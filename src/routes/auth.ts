@@ -15,6 +15,25 @@ import {
   isPlatformAdmin
 } from '../utils/auth';
 import { auditLogger } from '../utils/audit';
+import {
+  validatePasswordComplexity,
+  checkPasswordHistory,
+  addPasswordToHistory,
+  calculatePasswordExpiry,
+  checkAccountLockout,
+  incrementFailedLoginAttempts,
+  resetFailedLoginAttempts,
+  checkPasswordExpiry
+} from '../utils/passwordPolicy';
+import { createSession, checkSessionTimeout, updateSessionActivity } from '../utils/sessionManager';
+import {
+  setupMFA,
+  enableMFA,
+  disableMFA,
+  verifyMFAToken,
+  isMFAEnabled,
+  getRemainingBackupCodes
+} from '../utils/mfa';
 
 const authRouter = new Hono<{ Bindings: Env }>();
 
@@ -38,6 +57,14 @@ authRouter.post('/register', async (c) => {
     const body = await c.req.json();
     const { email, password, name } = registerSchema.parse(body);
 
+    const passwordValidation = validatePasswordComplexity(password);
+    if (!passwordValidation.valid) {
+      return c.json({
+        error: 'Password does not meet complexity requirements',
+        details: passwordValidation.errors
+      }, 400);
+    }
+
     const existingUser = await c.env.DB.prepare(
       'SELECT id FROM users WHERE email = ?'
     ).bind(email).first();
@@ -50,12 +77,15 @@ authRouter.post('/register', async (c) => {
     const userId = generateTokenId();
     const userType = determinUserType(email);
     const tenantId = userType === 'tenant' ? 'default' : null;
+    const passwordExpiresAt = calculatePasswordExpiry();
+    const now = Math.floor(Date.now() / 1000);
 
     await c.env.DB.prepare(
-      'INSERT INTO users (id, email, password_hash, name, role, user_type, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(userId, email, passwordHash, name || '', 'user', userType, tenantId).run();
+      `INSERT INTO users (id, email, password_hash, name, role, user_type, tenant_id, password_changed_at, password_expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(userId, email, passwordHash, name || '', 'user', userType, tenantId, now, passwordExpiresAt).run();
 
-    const now = Math.floor(Date.now() / 1000);
+    await addPasswordToHistory(c.env.DB, userId, passwordHash);
 
     if (userType === 'platform') {
       await auditLogger(c.env, {
@@ -125,19 +155,69 @@ authRouter.post('/register', async (c) => {
 authRouter.post('/login', async (c) => {
   try {
     const body = await c.req.json();
-    const { email, password } = loginSchema.parse(body);
+    const { email, password, mfaToken } = z.object({
+      email: z.string().email(),
+      password: z.string(),
+      mfaToken: z.string().optional()
+    }).parse(body);
 
     const user = await c.env.DB.prepare(
-      'SELECT id, email, password_hash, name, role, user_type, tenant_id FROM users WHERE email = ?'
+      'SELECT id, email, password_hash, name, role, user_type, tenant_id, password_expires_at FROM users WHERE email = ?'
     ).bind(email).first();
 
     if (!user) {
       return c.json({ error: 'Invalid email or password' }, 401);
     }
 
+    const lockoutStatus = await checkAccountLockout(c.env.DB, user.id as string);
+    if (lockoutStatus.locked) {
+      const remainingTime = Math.ceil(((lockoutStatus.lockedUntil || 0) - Math.floor(Date.now() / 1000)) / 60);
+      return c.json({
+        error: 'Account is locked due to too many failed login attempts',
+        details: `Please try again in ${remainingTime} minutes`
+      }, 403);
+    }
+
     const isValidPassword = await verifyPassword(password, user.password_hash as string);
     if (!isValidPassword) {
-      return c.json({ error: 'Invalid email or password' }, 401);
+      const lockoutResult = await incrementFailedLoginAttempts(c.env.DB, user.id as string);
+      if (lockoutResult.locked) {
+        return c.json({
+          error: 'Account is locked due to too many failed login attempts',
+          details: 'Please try again in 30 minutes'
+        }, 403);
+      }
+      return c.json({
+        error: 'Invalid email or password',
+        details: `${5 - lockoutResult.attempts} attempts remaining`
+      }, 401);
+    }
+
+    await resetFailedLoginAttempts(c.env.DB, user.id as string);
+
+    const passwordExpiryStatus = await checkPasswordExpiry(c.env.DB, user.id as string);
+    if (passwordExpiryStatus.expired) {
+      return c.json({
+        error: 'Password has expired',
+        requiresPasswordChange: true,
+        userId: user.id
+      }, 403);
+    }
+
+    const mfaEnabled = await isMFAEnabled(c.env.DB, user.id as string);
+    if (mfaEnabled) {
+      if (!mfaToken) {
+        return c.json({
+          error: 'MFA token required',
+          requiresMFA: true,
+          userId: user.id
+        }, 403);
+      }
+
+      const mfaValid = await verifyMFAToken(c.env.DB, user.id as string, mfaToken);
+      if (!mfaValid) {
+        return c.json({ error: 'Invalid MFA token' }, 401);
+      }
     }
 
     const now = Math.floor(Date.now() / 1000);
@@ -166,8 +246,6 @@ authRouter.post('/login', async (c) => {
       });
     }
 
-    const sessionId = generateTokenId();
-
     const accessTokenPayload: JWTPayload = {
       user_id: user.id as string,
       email: user.email as string,
@@ -180,7 +258,7 @@ authRouter.post('/login', async (c) => {
 
     const refreshTokenPayload = {
       user_id: user.id as string,
-      session_id: sessionId,
+      session_id: crypto.randomUUID(),
       exp: now + (60 * 60 * 24 * 7),
       iat: now
     };
@@ -188,9 +266,16 @@ authRouter.post('/login', async (c) => {
     const accessToken = await signJWT(accessTokenPayload, c.env.JWT_SECRET);
     const refreshToken = await signRefreshToken(refreshTokenPayload, c.env.JWT_SECRET);
 
-    await c.env.DB.prepare(
-      'INSERT INTO sessions (id, user_id, refresh_token, expires_at) VALUES (?, ?, ?, ?)'
-    ).bind(sessionId, user.id, refreshToken, now + (60 * 60 * 24 * 7)).run();
+    const ipAddress = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+    const userAgent = c.req.header('User-Agent');
+
+    await createSession(
+      c.env.DB,
+      user.id as string,
+      refreshToken,
+      ipAddress,
+      userAgent
+    );
 
     await auditLogger(c.env, {
       tenant_id: user.tenant_id as string,
@@ -230,23 +315,22 @@ authRouter.post('/refresh', async (c) => {
 
     const payload = await verifyRefreshToken(refreshToken, c.env.JWT_SECRET);
 
-    const session = await c.env.DB.prepare(
-      'SELECT id, user_id, expires_at FROM sessions WHERE id = ? AND refresh_token = ?'
-    ).bind(payload.session_id, refreshToken).first();
-
-    if (!session) {
-      return c.json({ error: 'Invalid refresh token' }, 401);
+    const sessionStatus = await checkSessionTimeout(c.env.DB, refreshToken);
+    if (!sessionStatus.valid) {
+      return c.json({
+        error: sessionStatus.reason || 'Session invalid',
+        requiresReauth: true
+      }, 401);
     }
 
-    const now = Math.floor(Date.now() / 1000);
-    if ((session.expires_at as number) < now) {
-      await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(session.id).run();
-      return c.json({ error: 'Refresh token expired' }, 401);
-    }
+    const ipAddress = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For');
+    const userAgent = c.req.header('User-Agent');
+
+    await updateSessionActivity(c.env.DB, sessionStatus.session!.id, ipAddress, userAgent);
 
     const user = await c.env.DB.prepare(
-      'SELECT id, email, role FROM users WHERE id = ?'
-    ).bind(session.user_id).first();
+      'SELECT id, email, role, user_type, tenant_id FROM users WHERE id = ?'
+    ).bind(sessionStatus.session!.userId).first();
 
     if (!user) {
       return c.json({ error: 'User not found' }, 401);
@@ -541,6 +625,135 @@ authRouter.post('/switch-tenant', async (c) => {
     }
     console.error('Tenant switch error:', error);
     return c.json({ error: 'Tenant switch failed' }, 500);
+  }
+});
+
+authRouter.post('/mfa/setup', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ error: 'Missing authorization header' }, 401);
+    }
+
+    const token = authHeader.substring(7);
+    const payload = await verifyJWT(token, c.env.JWT_SECRET);
+
+    const { secret, backupCodes, qrCodeURL } = await setupMFA(c.env.DB, payload.user_id);
+
+    return c.json({
+      success: true,
+      secret,
+      backupCodes,
+      qrCodeURL
+    });
+  } catch (error) {
+    console.error('MFA setup error:', error);
+    return c.json({ error: 'MFA setup failed' }, 500);
+  }
+});
+
+authRouter.post('/mfa/enable', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ error: 'Missing authorization header' }, 401);
+    }
+
+    const token = authHeader.substring(7);
+    const payload = await verifyJWT(token, c.env.JWT_SECRET);
+
+    const body = await c.req.json();
+    const { token: mfaToken } = z.object({
+      token: z.string()
+    }).parse(body);
+
+    const success = await enableMFA(c.env.DB, payload.user_id, mfaToken);
+
+    if (!success) {
+      return c.json({ error: 'Invalid MFA token' }, 400);
+    }
+
+    await auditLogger(c.env, {
+      tenant_id: payload.tenant_id || 'platform',
+      user_id: payload.user_id,
+      action: 'mfa_enabled',
+      resource_type: 'auth',
+      ip_address: c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown',
+      user_agent: c.req.header('User-Agent')
+    });
+
+    return c.json({ success: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return c.json({ error: 'Invalid request data', details: error.errors }, 400);
+    }
+    console.error('MFA enable error:', error);
+    return c.json({ error: 'Failed to enable MFA' }, 500);
+  }
+});
+
+authRouter.post('/mfa/disable', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ error: 'Missing authorization header' }, 401);
+    }
+
+    const token = authHeader.substring(7);
+    const payload = await verifyJWT(token, c.env.JWT_SECRET);
+
+    const body = await c.req.json();
+    const { token: mfaToken } = z.object({
+      token: z.string()
+    }).parse(body);
+
+    const isValid = await verifyMFAToken(c.env.DB, payload.user_id, mfaToken);
+    if (!isValid) {
+      return c.json({ error: 'Invalid MFA token' }, 401);
+    }
+
+    await disableMFA(c.env.DB, payload.user_id);
+
+    await auditLogger(c.env, {
+      tenant_id: payload.tenant_id || 'platform',
+      user_id: payload.user_id,
+      action: 'mfa_disabled',
+      resource_type: 'auth',
+      ip_address: c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown',
+      user_agent: c.req.header('User-Agent')
+    });
+
+    return c.json({ success: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return c.json({ error: 'Invalid request data', details: error.errors }, 400);
+    }
+    console.error('MFA disable error:', error);
+    return c.json({ error: 'Failed to disable MFA' }, 500);
+  }
+});
+
+authRouter.get('/mfa/status', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ error: 'Missing authorization header' }, 401);
+    }
+
+    const token = authHeader.substring(7);
+    const payload = await verifyJWT(token, c.env.JWT_SECRET);
+
+    const enabled = await isMFAEnabled(c.env.DB, payload.user_id);
+    const backupCodes = enabled ? await getRemainingBackupCodes(c.env.DB, payload.user_id) : [];
+
+    return c.json({
+      success: true,
+      enabled,
+      backupCodesRemaining: backupCodes.length
+    });
+  } catch (error) {
+    console.error('MFA status error:', error);
+    return c.json({ error: 'Failed to get MFA status' }, 500);
   }
 });
 
