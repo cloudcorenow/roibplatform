@@ -11,6 +11,7 @@ import { auditLogger } from './utils/audit';
 import { createCorsHeaders, handlePreflight } from './utils/cors';
 import { validateUserId, rateLimitCheck } from './utils/security';
 import { verifyJWT } from './utils/auth';
+import { sessionTimeoutMiddleware, sessionCleanupMiddleware } from './middleware/sessionTimeout';
 
 export interface Env {
   DB: D1Database;
@@ -52,14 +53,17 @@ app.use('*', async (c, next) => {
   });
 });
 
+// Session cleanup middleware (runs periodically)
+app.use('/api/*', sessionCleanupMiddleware);
+
 // Rate limiting middleware
 app.use('/api/*', async (c, next) => {
   const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
   const rateLimitKey = `api:${ip}`;
-  
+
   const allowed = await rateLimitCheck(c.env, rateLimitKey, 1000, 60000); // 1000 requests per minute
   if (!allowed) {
-    return c.json({ 
+    return c.json({
       error: 'Rate limit exceeded',
       code: 'RATE_LIMIT_EXCEEDED'
     }, 429);
@@ -145,6 +149,9 @@ app.use('/api/*', async (c, next) => {
 
   await next();
 });
+
+// Session timeout middleware (checks for inactive sessions)
+app.use('/api/*', sessionTimeoutMiddleware);
 
 // Routes
 app.route('/api/auth', authRouter);
