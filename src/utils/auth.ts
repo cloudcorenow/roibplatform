@@ -19,8 +19,8 @@ export interface RefreshTokenPayload {
   iat: number;
 }
 
-async function base64UrlEncode(buffer: ArrayBuffer): Promise<string> {
-  const bytes = new Uint8Array(buffer);
+async function base64UrlEncode(buffer: ArrayBuffer | Uint8Array): Promise<string> {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);

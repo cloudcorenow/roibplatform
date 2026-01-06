@@ -18,11 +18,11 @@ centralReachRouter.post('/sync', async (c) => {
       throw new Error(`CentralReach API error: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     return c.json({
       success: true,
-      synced: data.length || 0,
+      synced: Array.isArray(data) ? data.length : 0,
       message: 'CentralReach sync completed'
     });
   } catch (error) {

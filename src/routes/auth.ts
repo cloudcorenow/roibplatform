@@ -336,10 +336,14 @@ authRouter.post('/refresh', async (c) => {
       return c.json({ error: 'User not found' }, 401);
     }
 
+    const now = Math.floor(Date.now() / 1000);
+
     const accessTokenPayload: JWTPayload = {
       user_id: user.id as string,
       email: user.email as string,
       role: user.role as string,
+      user_type: (user.user_type as 'tenant' | 'platform') || 'tenant',
+      tenant_id: user.tenant_id as string,
       exp: now + (60 * 60),
       iat: now
     };

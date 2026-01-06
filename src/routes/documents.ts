@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env, HonoEnv } from '../types';
 import { auditLogger } from '../utils/audit';
-import { requirePermission, createSecurityContext } from '../utils/security';
+import { checkPermission, createSecurityContext } from '../utils/security';
 import { withRetry } from '../utils/retry';
 import { sanitizeInput } from '../utils/validation';
 import { calculateChecksum } from '../utils/documentIntegrity';
@@ -38,10 +38,16 @@ documentsRouter.post('/upload', async (c) => {
     const userId = c.get('user_id');
     const securityContext = createSecurityContext(c);
 
-    requirePermission(securityContext, 'documents:create');
+    if (!checkPermission(securityContext, 'documents:create')) {
+      return c.json({ error: 'Permission denied', code: 'FORBIDDEN' }, 403);
+    }
 
     const formData = await c.req.formData();
-    const file = formData.get('file') as File;
+    const file = formData.get('file') as File | null;
+
+    if (!file || typeof file === 'string') {
+      return c.json({ error: 'No valid file provided', code: 'VALIDATION_ERROR' }, 400);
+    }
     const category = (formData.get('category') as string) || 'general';
     const description = formData.get('description') as string | null;
 
@@ -168,7 +174,9 @@ documentsRouter.get('/', async (c) => {
     const tenantId = c.get('tenant_id');
     const securityContext = createSecurityContext(c);
 
-    requirePermission(securityContext, 'documents:read');
+    if (!checkPermission(securityContext, 'documents:read')) {
+      return c.json({ error: 'Permission denied', code: 'FORBIDDEN' }, 403);
+    }
 
     const category = c.req.query('category');
     const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10), 200);
@@ -244,7 +252,9 @@ documentsRouter.get('/:id', async (c) => {
     const id = c.req.param('id');
     const securityContext = createSecurityContext(c);
 
-    requirePermission(securityContext, 'documents:read');
+    if (!checkPermission(securityContext, 'documents:read')) {
+      return c.json({ error: 'Permission denied', code: 'FORBIDDEN' }, 403);
+    }
 
     const doc = await withRetry(async () => {
       return c.env.DB.prepare(`
@@ -307,7 +317,9 @@ documentsRouter.delete('/:id', async (c) => {
     const id = c.req.param('id');
     const securityContext = createSecurityContext(c);
 
-    requirePermission(securityContext, 'documents:delete');
+    if (!checkPermission(securityContext, 'documents:delete')) {
+      return c.json({ error: 'Permission denied', code: 'FORBIDDEN' }, 403);
+    }
 
     const doc = await withRetry(async () => {
       return c.env.DB.prepare(`
@@ -363,7 +375,9 @@ documentsRouter.get('/:id/metadata', async (c) => {
     const id = c.req.param('id');
     const securityContext = createSecurityContext(c);
 
-    requirePermission(securityContext, 'documents:read');
+    if (!checkPermission(securityContext, 'documents:read')) {
+      return c.json({ error: 'Permission denied', code: 'FORBIDDEN' }, 403);
+    }
 
     const doc = await withRetry(async () => {
       return c.env.DB.prepare(`

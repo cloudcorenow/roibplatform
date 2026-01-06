@@ -94,12 +94,12 @@ export async function getAuditLogs(
 
   // Get total count
   const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
-  const countResult = await env.DB.prepare(countQuery).bind(...params).first();
+  const countResult = await env.DB.prepare(countQuery).bind(...params).first() as { total: number } | null;
   const total = countResult?.total || 0;
 
   // Get paginated results
   query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-  params.push(limit, offset);
+  params.push(String(limit), String(offset));
 
   const { results } = await env.DB.prepare(query).bind(...params).all();
 
