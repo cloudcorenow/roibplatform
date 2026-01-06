@@ -8,12 +8,12 @@ command = "npm install"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "hipaa_compliance_db"
-database_id = "your-database-id"
+database_name = "roibplatform"
+database_id = "409e74c6-6687-4b06-b3d2-e5f265779c25"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "your-kv-namespace-id"
+id = "4a66561d3d30475d965543ff8ac44548"
 
 [[r2_buckets]]
 binding = "DOCUMENTS"
