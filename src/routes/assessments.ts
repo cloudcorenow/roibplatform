@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import type { Env } from '../worker';
+import type { Env, HonoEnv } from '../types';
 import { auditLogger } from '../utils/audit';
 
-const router = new Hono<{ Bindings: Env }>();
+const router = new Hono<HonoEnv>();
 
 router.get('/', async (c) => {
   const userId = c.get('user_id');

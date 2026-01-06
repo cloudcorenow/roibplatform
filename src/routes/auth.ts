@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { Env } from '../worker';
+import type { Env, HonoEnv } from '../types';
 import {
   signJWT,
   verifyJWT,
@@ -35,7 +35,7 @@ import {
   getRemainingBackupCodes
 } from '../utils/mfa';
 
-const authRouter = new Hono<{ Bindings: Env }>();
+const authRouter = new Hono<HonoEnv>();
 
 const registerSchema = z.object({
   email: z.string().email(),

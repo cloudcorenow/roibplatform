@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { Env } from '../worker';
+import type { Env, HonoEnv } from '../types';
 import { auditLogger } from '../utils/audit';
 import { requirePermission, createSecurityContext } from '../utils/security';
 import { withRetry } from '../utils/retry';
 import { sanitizeInput } from '../utils/validation';
 import { calculateChecksum } from '../utils/documentIntegrity';
 
-const documentsRouter = new Hono<{ Bindings: Env }>();
+const documentsRouter = new Hono<HonoEnv>();
 
 const ALLOWED_MIME_TYPES = [
   'application/pdf',

@@ -12,22 +12,11 @@ import { createCorsHeaders, handlePreflight } from './utils/cors';
 import { validateUserId, rateLimitCheck } from './utils/security';
 import { verifyJWT } from './utils/auth';
 import { sessionTimeoutMiddleware, sessionCleanupMiddleware } from './middleware/sessionTimeout';
+import type { Env, HonoEnv } from './types';
 
-export interface Env {
-  DB: D1Database;
-  KV: KVNamespace;
-  DOCUMENTS: R2Bucket;
-  CENTRALREACH_API_KEY: string;
-  CENTRALREACH_BASE_URL: string;
-  CENTRALREACH_ORG_ID: string;
-  QUICKBOOKS_CLIENT_ID: string;
-  QUICKBOOKS_CLIENT_SECRET: string;
-  JWT_SECRET: string;
-  APP_ORIGIN: string;
-  ENVIRONMENT: string;
-}
+export type { Env } from './types';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<HonoEnv>();
 
 // Global CORS middleware with environment-specific origins
 app.use('*', async (c, next) => {
