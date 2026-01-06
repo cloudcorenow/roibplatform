@@ -17,7 +17,7 @@ id = "4a66561d3d30475d965543ff8ac44548"
 
 [[r2_buckets]]
 binding = "DOCUMENTS"
-bucket_name = "hipaa-documents"
+bucket_name = "roiblueprint-documents"
 
 [vars]
 ENVIRONMENT = "production"
