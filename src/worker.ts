@@ -151,10 +151,30 @@ app.route('/api/assessments', assessmentsRouter);
 app.route('/api/centralreach', centralReachRouter);
 app.route('/api/quickbooks', quickBooksRouter);
 
+// Root endpoint
+app.get('/', (c) => {
+  return c.json({
+    name: 'HIPAA Compliance API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: {
+      auth: '/api/auth/*',
+      timeEntries: '/api/time-entries/*',
+      analytics: '/api/analytics/*',
+      documents: '/api/documents/*',
+      assessments: '/api/assessments/*',
+      centralReach: '/api/centralreach/*',
+      quickBooks: '/api/quickbooks/*',
+      health: '/health'
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Health check
 app.get('/health', (c) => {
-  return c.json({ 
-    status: 'ok', 
+  return c.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     environment: c.env.ENVIRONMENT || 'unknown'
   });
