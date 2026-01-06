@@ -66,3 +66,8 @@ export function requirePermission(permission: string) {
     return c.json({ error: 'Permission denied', code: 'FORBIDDEN' }, 403);
   };
 }
+
+export function checkPermission(context: SecurityContext, permission: string): boolean {
+  const adminRoles = ['admin', 'platform_admin'];
+  return adminRoles.includes(context.userRole);
+}

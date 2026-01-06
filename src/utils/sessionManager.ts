@@ -26,8 +26,9 @@ export async function checkSessionTimeout(
   }
 
   const now = Math.floor(Date.now() / 1000);
+  const expiresAt = session.expires_at as number;
 
-  if (session.expires_at < now) {
+  if (expiresAt < now) {
     await invalidateSession(db, session.id as string);
     return { valid: false, reason: 'Session expired' };
   }

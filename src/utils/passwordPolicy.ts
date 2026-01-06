@@ -114,8 +114,9 @@ export async function checkAccountLockout(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  if (user.locked_until && user.locked_until > now) {
-    return { locked: true, lockedUntil: user.locked_until as number };
+  const lockedUntil = user.locked_until as number | null;
+  if (lockedUntil && lockedUntil > now) {
+    return { locked: true, lockedUntil };
   }
 
   return { locked: false };
@@ -181,11 +182,12 @@ export async function checkPasswordExpiry(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  if (user.password_expires_at && user.password_expires_at < now) {
-    return { expired: true, expiresAt: user.password_expires_at as number };
+  const expiresAt = user.password_expires_at as number | null;
+  if (expiresAt && expiresAt < now) {
+    return { expired: true, expiresAt };
   }
 
-  return { expired: false, expiresAt: user.password_expires_at as number };
+  return { expired: false, expiresAt: expiresAt || undefined };
 }
 
 export const PASSWORD_POLICY = {

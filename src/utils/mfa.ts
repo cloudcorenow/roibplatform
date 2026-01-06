@@ -59,23 +59,22 @@ async function hmacSha1(key: Uint8Array, message: Uint8Array): Promise<Uint8Arra
   return new Uint8Array(signature);
 }
 
-function generateHOTP(secret: Uint8Array, counter: number): string {
+async function generateHOTP(secret: Uint8Array, counter: number): Promise<string> {
   const buffer = new ArrayBuffer(8);
   const view = new DataView(buffer);
   view.setBigUint64(0, BigInt(counter), false);
 
-  return hmacSha1(secret, new Uint8Array(buffer)).then(hmac => {
-    const offset = hmac[hmac.length - 1] & 0x0f;
-    const binary = (
-      ((hmac[offset] & 0x7f) << 24) |
-      ((hmac[offset + 1] & 0xff) << 16) |
-      ((hmac[offset + 2] & 0xff) << 8) |
-      (hmac[offset + 3] & 0xff)
-    );
+  const hmac = await hmacSha1(secret, new Uint8Array(buffer));
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const binary = (
+    ((hmac[offset] & 0x7f) << 24) |
+    ((hmac[offset + 1] & 0xff) << 16) |
+    ((hmac[offset + 2] & 0xff) << 8) |
+    (hmac[offset + 3] & 0xff)
+  );
 
-    const otp = binary % 1000000;
-    return otp.toString().padStart(6, '0');
-  });
+  const otp = binary % 1000000;
+  return otp.toString().padStart(6, '0');
 }
 
 function getCurrentCounter(timeStep: number = 30): number {

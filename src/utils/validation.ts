@@ -1,8 +1,8 @@
-export function sanitizeInput(input: string): string {
+export function sanitizeInput(input: string, maxLength: number = 10000): string {
   return input
     .replace(/[<>'"]/g, '')
     .trim()
-    .slice(0, 10000);
+    .slice(0, maxLength);
 }
 
 export function isValidEmail(email: string): boolean {
