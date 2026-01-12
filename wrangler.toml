@@ -1,0 +1,57 @@
+name = "roiblueprint-api"
+main = "src/worker.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[env.production]
+name = "roiblueprint-api"
+
+[env.staging]
+name = "roiblueprint-api-staging"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "roibplatform"
+database_id = "409e74c6-6687-4b06-b3d2-e5f265779c25"
+
+[env.staging.d1_databases]
+binding = "DB"
+database_name = "roiblueprint-staging"
+database_id = "replace-with-staging-d1-id"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "4a66561d3d30475d965543ff8ac44548"
+preview_id = "4a66561d3d30475d965543ff8ac44548"
+
+[env.staging.kv_namespaces]
+binding = "KV"
+id = "replace-with-staging-kv-id"
+
+[[r2_buckets]]
+binding = "DOCUMENTS"
+bucket_name = "roiblueprint-documents"
+preview_bucket_name = "roiblueprint-documents-preview"
+
+[[env.staging.r2_buckets]]
+binding = "DOCUMENTS"
+bucket_name = "roiblueprint-documents-staging"
+
+[vars]
+ENVIRONMENT = "production"
+APP_ORIGIN = "https://meek-cheesecake-1382d7.netlify.app"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+APP_ORIGIN = "https://staging.yourapp.com"
+
+# Environment variables (set via wrangler secret put)
+# CENTRALREACH_API_KEY
+# CENTRALREACH_BASE_URL
+# CENTRALREACH_ORG_ID
+# QUICKBOOKS_CLIENT_ID
+# QUICKBOOKS_CLIENT_SECRET
+# JWT_SECRET
